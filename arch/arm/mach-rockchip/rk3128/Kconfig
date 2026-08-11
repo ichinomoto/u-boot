@@ -11,6 +11,13 @@ config TARGET_EVB_RK3128
 	  with full function and phisical connectors support like
 	  usb2.0 host ports, LVDS, JTAG, MAC, SDcard, HDMI, USB-2-serial...
 
+config TARGET_POMERA_DM200
+	bool "King Jim Pomera DM200"
+	select BOARD_LATE_INIT
+	help
+	  Pomera DM200 with 512 MiB RAM, RK818 and UART1 console.
+	  Runs after a Rockchip DDR loader and miniloader.
+
 endchoice
 
 config ROCKCHIP_BOOT_MODE_REG
@@ -26,5 +33,6 @@ config SYS_MALLOC_F_LEN
 	default 0x0800
 
 source "board/rockchip/evb_rk3128/Kconfig"
+source "board/kingjim/pomera_dm200/Kconfig"
 
 endif

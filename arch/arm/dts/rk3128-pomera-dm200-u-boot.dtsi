@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0+
+#include "rk3128-u-boot.dtsi"
+
+&dmc {
+	reg = <0x20004000 0x1000>;
+};
+
+&emmc {
+	bootph-all;
+	fifo-mode;
+};
+
+&sdmmc {
+	fifo-mode;
+};
+
+&uart1 {
+	bootph-all;
+};
