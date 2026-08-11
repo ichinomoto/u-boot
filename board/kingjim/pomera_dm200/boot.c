@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0+
-/* Minimal reader for DM200's KRNL and RSCE images; no vendor storage API. */
+/* Minimal DM200 reader for direct Linux rootfs boot. */
 #include <blk.h>
 #include <command.h>
 #include <dm.h>
@@ -13,30 +13,27 @@
 
 #define SECTOR_SIZE	512
 #define KERNEL_ADDR	0x62000000
-#define RAMDISK_ADDR	0x64000000
-#define FDT_ADDR		0x61f00000
+#define FDT_ADDR	0x61f00000
 
 struct dm200_layout {
 	lbaint_t kernel;
 	u32 kernel_sectors;
 	lbaint_t resource;
 	u32 resource_sectors;
-	lbaint_t boot;
-	u32 boot_sectors;
 };
 
 /* Absolute sectors: original DM200 layout plus the 4 MiB SD firmware base. */
 static const struct dm200_layout sd_layout = {
-	0x6000, 0x6000, 0xc000, 0x3000, 0xf000, 0x10000,
+	0x6000, 0x6000, 0xc000, 0x3000,
 };
 
 /* Absolute sectors from the DM200 Linux mtdparts command line. */
 static const struct dm200_layout emmc_layout = {
-	0x4000, 0x6000, 0xa000, 0x3000, 0xd000, 0x10000,
+	0x4000, 0x6000, 0xa000, 0x3000,
 };
 
 static const struct dm200_layout recovery_layout = {
-	0x3f8000, 0x6000, 0xa000, 0x3000, 0x3fe000, 0x10000,
+	0x3f8000, 0x6000, 0xa000, 0x3000,
 };
 
 static int read_sectors(struct blk_desc *desc, lbaint_t start,
@@ -100,45 +97,6 @@ out:
 	return ret;
 }
 
-static int load_appended_fdt(u32 kernel_size)
-{
-	const u8 *kernel = map_sysmem(KERNEL_ADDR, kernel_size);
-	u32 start, end, offset, size;
-	void *fdt = map_sysmem(FDT_ADDR, SZ_1M);
-	int ret;
-
-	/* ARM zImage header: magic, start and end at offsets 0x24..0x2c. */
-	if (kernel_size < 0x30 || get_unaligned_le32(kernel + 0x24) != 0x016f2818) {
-		ret = -ENOENT;
-		goto out;
-	}
-	start = get_unaligned_le32(kernel + 0x28);
-	end = get_unaligned_le32(kernel + 0x2c);
-	if (end <= start)
-		goto no_dtb;
-	offset = end - start;
-	if (offset > kernel_size || kernel_size - offset < sizeof(struct fdt_header))
-		goto no_dtb;
-	if (get_unaligned_be32(kernel + offset) != FDT_MAGIC)
-		goto no_dtb;
-	size = get_unaligned_be32(kernel + offset + 4);
-	if (size > SZ_1M || size > kernel_size - offset)
-		goto too_big;
-	memcpy(fdt, kernel + offset, size);
-	ret = fdt_check_full(fdt, size);
-	goto out;
-
-no_dtb:
-	ret = -ENOENT;
-	goto out;
-too_big:
-	ret = -EFBIG;
-out:
-	unmap_sysmem(fdt);
-	unmap_sysmem((void *)kernel);
-	return ret;
-}
-
 static int load_resource_fdt(struct blk_desc *desc, lbaint_t sector,
 			     u32 sectors)
 {
@@ -181,6 +139,7 @@ static int load_resource_fdt(struct blk_desc *desc, lbaint_t sector,
 		unmap_sysmem(fdt);
 		return ret;
 	}
+	unmap_sysmem(fdt);
 	return -ENOENT;
 }
 
@@ -192,7 +151,7 @@ static int do_dm200boot(struct cmd_tbl *cmdtp, int flag, int argc,
 	struct udevice *dev;
 	struct blk_desc *desc;
 	struct mmc *mmc;
-	u32 kernel_size, ramdisk_size;
+	u32 kernel_size;
 	int seq = 1, ret;
 	char command[96];
 
@@ -206,7 +165,7 @@ static int do_dm200boot(struct cmd_tbl *cmdtp, int flag, int argc,
 	} else if (strcmp(source, "sd")) {
 		return CMD_RET_USAGE;
 	}
-	printf("DM200: boot from %s (mmc %d)\n", source, seq);
+	printf("DM200: boot from %s (mmc %d), direct rootfs\n", source, seq);
 	ret = uclass_get_device_by_seq(UCLASS_MMC, seq, &dev);
 	if (ret)
 		goto fail;
@@ -223,19 +182,15 @@ static int do_dm200boot(struct cmd_tbl *cmdtp, int flag, int argc,
 			KERNEL_ADDR, &kernel_size);
 	if (ret)
 		goto fail;
-	ret = load_appended_fdt(kernel_size);
-	if (ret == -ENOENT)
-		ret = load_resource_fdt(desc, layout->resource, layout->resource_sectors);
+	ret = load_resource_fdt(desc, layout->resource, layout->resource_sectors);
 	if (ret)
 		goto fail;
-	ret = load_krnl(desc, layout->boot, layout->boot_sectors,
-			RAMDISK_ADDR, &ramdisk_size);
-	if (ret)
-		goto fail;
-	printf("DM200: kernel %u bytes, initramfs %u bytes\n",
-	       kernel_size, ramdisk_size);
-	snprintf(command, sizeof(command), "bootz %x %x:%x %x",
-		 KERNEL_ADDR, RAMDISK_ADDR, ramdisk_size, FDT_ADDR);
+	printf("DM200: kernel %u bytes, separate resource DTB, no initramfs\n",
+	       kernel_size);
+
+	/* '-' tells bootz that no external initramfs is present. */
+	snprintf(command, sizeof(command), "bootz %x - %x",
+		 KERNEL_ADDR, FDT_ADDR);
 	return run_command(command, 0) ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
 
 fail:
@@ -244,6 +199,6 @@ fail:
 }
 
 U_BOOT_CMD(dm200boot, 2, 0, do_dm200boot,
-	   "boot DM200 KRNL/resource images",
+	   "boot DM200 KRNL and resource images with a direct rootfs",
 	   "[sd|emmc|recovery]\n"
 	   "    sd: SD boot image (default); emmc/recovery: original DM200 layout");
