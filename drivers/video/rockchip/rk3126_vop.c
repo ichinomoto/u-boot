@@ -6,6 +6,7 @@
 #include <clk.h>
 #include <display.h>
 #include <dm.h>
+#include <dm/device_compat.h>
 #include <linux/delay.h>
 #include <log.h>
 #include <reset.h>
@@ -138,6 +139,7 @@ static void rk3126_enable(struct udevice *dev, ulong fbbase,
 	u32 vop_fmt;
 	u32 hactive = edid->hactive.typ;
 	u32 vactive = edid->vactive.typ;
+	int ret;
 
 	/* Re-ungate clocks (clk_set_rate may have disrupted them) */
 	rk3126_vop_ungate_clocks();
@@ -172,6 +174,18 @@ static void rk3126_enable(struct udevice *dev, ulong fbbase,
 
 	/* Commit all shadow registers */
 	writel(0x01, base + REG_CFG_DONE);
+
+	/* Apply the pixel-clock reset after programming the display mode. */
+	ret = reset_assert(dclk_rst);
+	if (ret) {
+		dev_warn(dev, "failed to assert dclk reset (ret=%d)\n", ret);
+		return;
+	}
+	udelay(20);
+
+	ret = reset_deassert(dclk_rst);
+	if (ret)
+		dev_warn(dev, "failed to deassert dclk reset (ret=%d)\n", ret);
 }
 
 static void rk3126_enable_output(struct udevice *dev, enum vop_modes mode)

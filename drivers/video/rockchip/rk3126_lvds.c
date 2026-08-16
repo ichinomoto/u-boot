@@ -32,11 +32,13 @@ DECLARE_GLOBAL_DATA_PTR;
 #define LVDS_CON0_TTL_EN		BIT(7)             /* TTL mode enable */
 #define LVDS_CON0_LANE0_EN		BIT(8)             /* MIPI PHY lane0 */
 #define LVDS_CON0_FORCEX_EN		BIT(9)             /* DPI force enable */
+#define LVDS_CON0_WMSK			(BIT(0) | GENMASK(3, 1) | \
+					 BIT(6) | BIT(7) | BIT(8) | BIT(9))
 
 /* LVDS output format values */
 #define LVDS_FMT_8BIT_1	0
 #define LVDS_FMT_8BIT_2	1
-#define LVDS_FMT_8BIT_3	2  /* JEIDA-24 */
+#define LVDS_FMT_8BIT_3	2  /* JEIDA-18 on RK3128 */
 #define LVDS_FMT_6BIT	3
 
 struct rk3126_lvds_priv {
@@ -104,22 +106,39 @@ static int rk3126_lvds_enable(struct udevice *dev, int panel_bpp,
 			      const struct display_timing *edid)
 {
 	struct rk3126_lvds_priv *priv = dev_get_priv(dev);
+	const char *mapping;
+	int format;
 	u32 val;
 	int ret;
 
-	/*
-	 * Configure GRF_LVDS_CON0 per vendor rk312x_lcdc.h.
-	 * LVDS_8BIT_3 (=2) is the JEIDA-24 format.
-	 */
+	/* Configure GRF_LVDS_CON0 for the panel's LVDS data mapping. */
+	mapping = dev_read_string(priv->panel, "data-mapping");
+	if (!mapping) {
+		debug("%s: missing LVDS data mapping\n", __func__);
+		return -EINVAL;
+	}
+	if (!strcmp(mapping, "jeida-18"))
+		format = LVDS_FMT_8BIT_3;
+	else if (!strcmp(mapping, "jeida-24"))
+		format = LVDS_FMT_8BIT_2;
+	else if (!strcmp(mapping, "vesa-24"))
+		format = LVDS_FMT_8BIT_1;
+	else {
+		debug("%s: unsupported LVDS data mapping '%s'\n",
+		      __func__, mapping);
+		return -EINVAL;
+	}
+
 	val = LVDS_CON0_LVDSMODE_EN |
 	      LVDS_CON0_DATA_SEL(0) |
-	      LVDS_CON0_OUTPUT_FORMAT(LVDS_FMT_8BIT_3) |
+	      LVDS_CON0_OUTPUT_FORMAT(format) |
 	      LVDS_CON0_MSBSEL |
 	      LVDS_CON0_LANE0_EN |
 	      LVDS_CON0_FORCEX_EN;
 
-	/* Write with mask in upper 16 bits */
-	writel(val | (0xffff << 16), priv->grf + RK3126_GRF_LVDS_CON0);
+	/* Rockchip GRF writes use the upper half-word as a write mask. */
+	writel(val | (LVDS_CON0_WMSK << 16),
+	       priv->grf + RK3126_GRF_LVDS_CON0);
 
 	/* Set PHY mode to LVDS and power on */
 	ret = generic_phy_set_mode(&priv->phy, PHY_MODE_LVDS, 0);
@@ -130,38 +149,11 @@ static int rk3126_lvds_enable(struct udevice *dev, int panel_bpp,
 	if (ret)
 		return ret;
 
-	/*
-	 * Drive panel enable GPIO and backlight directly.
-	 * panel enable-gpios = GPIO0_C0 (pin 24)
-	 * backlight enable-gpios = GPIO0_C3 (pin 27)
-	 * PWM0 at 0x20050000, period=0x61a8 (25000ns = 40kHz)
-	 */
-#define GPIO0_BASE	0x2007c000
-#define GPIO_SWPORTA_DR		0x00
-#define GPIO_SWPORTA_DDR	0x04
-#define PWM0_BASE	0x20050000
-#define PWM_CNT		0x00
-#define PWM_PERIOD	0x04
-#define PWM_DUTY	0x08
-#define PWM_CTRL	0x0c
-	{
-		void __iomem *gpio0 = (void __iomem *)GPIO0_BASE;
-		void __iomem *pwm0 = (void __iomem *)PWM0_BASE;
-		u32 val;
-
-		/* Set GPIO0_C0 (pin 24) and GPIO0_C3 (pin 27) as output high */
-		val = readl(gpio0 + GPIO_SWPORTA_DDR);
-		val |= BIT(24) | BIT(27);
-		writel(val, gpio0 + GPIO_SWPORTA_DDR);
-
-		val = readl(gpio0 + GPIO_SWPORTA_DR);
-		val |= BIT(24) | BIT(27);
-		writel(val, gpio0 + GPIO_SWPORTA_DR);
-
-		/* Configure PWM0: period=25000, duty=12500 (50%), enable */
-		writel(25000, pwm0 + PWM_PERIOD);
-		writel(12500, pwm0 + PWM_DUTY);
-		writel(BIT(0) | BIT(3), pwm0 + PWM_CTRL); /* enable, continuous */
+	/* Let the panel driver apply its enable GPIO and PWM backlight. */
+	ret = panel_enable_backlight(priv->panel);
+	if (ret) {
+		generic_phy_power_off(&priv->phy);
+		return ret;
 	}
 
 	return 0;
