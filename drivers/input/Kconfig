@@ -106,7 +106,7 @@ config TEGRA_KEYBOARD
 
 config TC3589X_KEYB
 	bool "Toshiba TC3589x I2C keypad controller"
-	depends on DM_KEYBOARD && DM_I2C
+	depends on DM_KEYBOARD && DM_I2C && BUTTON
 	help
 	  Enable support for the Toshiba TC3589x series I2C-based keypad
 	  controller.
