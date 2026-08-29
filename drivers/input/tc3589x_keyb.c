@@ -5,6 +5,7 @@
  * Copyright (c) 2026 joshua stein <jcs@jcs.org>
  */
 
+#include <button.h>
 #include <dm.h>
 #include <i2c.h>
 #include <input.h>
@@ -71,6 +72,20 @@
 #define TC3589x_MAX_KMAP_ROWS		16	/* including Fn layer */
 #define TC3589x_MAX_COLS		12
 
+static const char * const tc3589x_modifier_labels[] = {
+	"Left Alt",
+	"Left Control",
+	"Left Shift",
+	"Right Shift",
+};
+
+static const u16 tc3589x_modifier_keycodes[] = {
+	KEY_LEFTALT,
+	KEY_LEFTCTRL,
+	KEY_LEFTSHIFT,
+	KEY_RIGHTSHIFT,
+};
+
 struct tc3589x_keyb_priv {
 	struct gpio_desc reset_gpio;
 	int rows;
@@ -78,6 +93,22 @@ struct tc3589x_keyb_priv {
 	u16 keymap[TC3589x_MAX_KMAP_ROWS][TC3589x_MAX_COLS];
 	u16 states[TC3589x_MAX_ROWS + 1];
 };
+
+static u16 tc3589x_read_modifiers(void)
+{
+	u16 state = 0;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(tc3589x_modifier_labels); i++) {
+		struct udevice *button;
+
+		if (!button_get_by_label(tc3589x_modifier_labels[i], &button) &&
+		    button_get_state(button) == BUTTON_ON)
+			state |= 1 << i;
+	}
+
+	return state;
+}
 
 static int tc3589x_read_keys(struct input_config *input)
 {
@@ -103,16 +134,25 @@ static int tc3589x_read_keys(struct input_config *input)
 		row = (k & TC3589x_KBDCODE_ROW_MASK) >>
 		    TC3589x_KBDCODE_ROW_SHIFT;
 		col = k & TC3589x_KBDCODE_COL_MASK;
+		if (row >= priv->rows || col >= priv->cols)
+			continue;
 		new_states[row] |= (1 << col);
 	}
 
+	/* The four modifier keys are GPIOs outside the TC3589x matrix. */
+	new_states[priv->rows] = tc3589x_read_modifiers();
+
 	/* collect state changes */
-	for (row = 0; row < priv->rows; row++) {
+	for (row = 0; row <= priv->rows; row++) {
 		for (col = 0; col < priv->cols; col++) {
 			was = priv->states[row] & (1 << col);
 			now = new_states[row] & (1 << col);
 
-			code = priv->keymap[row][col];
+			if (row == priv->rows)
+				code = col < ARRAY_SIZE(tc3589x_modifier_keycodes) ?
+					tc3589x_modifier_keycodes[col] : 0;
+			else
+				code = priv->keymap[row][col];
 			if (code == 0)
 				continue;
 
@@ -277,7 +317,9 @@ static int tc3589x_keyb_probe(struct udevice *dev)
 	/* set up input layer */
 	input->dev = dev;
 	input->read_keys = tc3589x_read_keys;
-	input_add_tables(input, false);
+	ret = input_add_tables(input, false);
+	if (ret)
+		return ret;
 
 	strcpy(sdev->name, "tc3589x-keyb");
 	ret = input_stdio_register(sdev);
