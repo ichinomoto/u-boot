@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0+
-/* Minimal DM200 reader for direct Linux rootfs boot. */
+/* DM200 direct boot and legacy eMMC U-Boot chainloader. */
 #include <blk.h>
 #include <command.h>
+#include <cpu_func.h>
 #include <dm.h>
-#include <env.h>
 #include <mapmem.h>
 #include <mmc.h>
 #include <memalign.h>
@@ -14,6 +14,11 @@
 #define SECTOR_SIZE	512
 #define KERNEL_ADDR	0x62000000
 #define FDT_ADDR	0x61f00000
+#define LEGACY_UBOOT_ADDR	0x60200000
+#define LEGACY_UBOOT_SECTOR	0x4000
+#define LOADER_HEADER_SIZE	2048
+#define LOADER_HEADER_SECTORS	(LOADER_HEADER_SIZE / SECTOR_SIZE)
+#define LOADER_SLOT_SIZE	SZ_1M
 
 struct dm200_layout {
 	lbaint_t kernel;
@@ -25,11 +30,6 @@ struct dm200_layout {
 /* Absolute sectors: original DM200 layout plus the 4 MiB SD firmware base. */
 static const struct dm200_layout sd_layout = {
 	0x6000, 0x6000, 0xc000, 0x3000,
-};
-
-/* Absolute sectors from the DM200 Linux mtdparts command line. */
-static const struct dm200_layout emmc_layout = {
-	0x4000, 0x6000, 0xa000, 0x3000,
 };
 
 static const struct dm200_layout recovery_layout = {
@@ -54,6 +54,48 @@ static u32 rockchip_crc(const u8 *data, u32 size)
 			crc = (crc << 1) ^ ((crc & BIT(31)) ? 0x04c10db7 : 0);
 	}
 	return crc;
+}
+
+static int load_legacy_uboot(struct blk_desc *desc)
+{
+	ALLOC_CACHE_ALIGN_BUFFER(u8, header, LOADER_HEADER_SIZE);
+	u32 load_addr, size, crc, blocks;
+	void *buf;
+	int ret;
+
+	ret = read_sectors(desc, LEGACY_UBOOT_SECTOR,
+			   LOADER_HEADER_SECTORS, header);
+	if (ret)
+		return ret;
+	if (memcmp(header, "LOADER  ", 8))
+		return -EINVAL;
+
+	load_addr = get_unaligned_le32(header + 16);
+	size = get_unaligned_le32(header + 20);
+	crc = get_unaligned_le32(header + 24);
+	if (load_addr != LEGACY_UBOOT_ADDR || !size ||
+	    size > LOADER_SLOT_SIZE - LOADER_HEADER_SIZE)
+		return -EINVAL;
+
+	blocks = DIV_ROUND_UP(size, SECTOR_SIZE);
+	buf = map_sysmem(load_addr, blocks * SECTOR_SIZE);
+	ret = read_sectors(desc, LEGACY_UBOOT_SECTOR + LOADER_HEADER_SECTORS,
+			   blocks, buf);
+	if (ret)
+		goto out;
+	if (rockchip_crc(buf, size) != crc) {
+		ret = -EBADMSG;
+		goto out;
+	}
+
+	flush_cache(load_addr, blocks * SECTOR_SIZE);
+	invalidate_icache_all();
+	printf("DM200: legacy eMMC U-Boot loaded at 0x%08x (%u bytes)\n",
+	       load_addr, size);
+
+out:
+	unmap_sysmem(buf);
+	return ret;
 }
 
 static int load_krnl(struct blk_desc *desc, lbaint_t sector,
@@ -153,19 +195,25 @@ static int do_dm200boot(struct cmd_tbl *cmdtp, int flag, int argc,
 	struct mmc *mmc;
 	u32 kernel_size;
 	int seq = 1, ret;
+	bool chainload_legacy = false;
+	unsigned long legacy_rc;
 	char command[96];
 
 	if (!strcmp(source, "emmc")) {
 		seq = 0;
-		layout = env_get_yesno("dm200_recovery") == 1 ?
-			&recovery_layout : &emmc_layout;
+		chainload_legacy = true;
 	} else if (!strcmp(source, "recovery")) {
 		seq = 0;
 		layout = &recovery_layout;
 	} else if (strcmp(source, "sd")) {
 		return CMD_RET_USAGE;
 	}
-	printf("DM200: boot from %s (mmc %d), direct rootfs\n", source, seq);
+	if (chainload_legacy)
+		printf("DM200: boot from %s (mmc %d), legacy U-Boot\n",
+		       source, seq);
+	else
+		printf("DM200: boot from %s (mmc %d), direct rootfs\n",
+		       source, seq);
 	ret = uclass_get_device_by_seq(UCLASS_MMC, seq, &dev);
 	if (ret)
 		goto fail;
@@ -177,6 +225,19 @@ static int do_dm200boot(struct cmd_tbl *cmdtp, int flag, int argc,
 	if (!desc || desc->blksz != SECTOR_SIZE) {
 		ret = -EINVAL;
 		goto fail;
+	}
+	if (chainload_legacy) {
+		puts("DM200: loading legacy eMMC U-Boot\n");
+		ret = load_legacy_uboot(desc);
+		if (ret)
+			goto fail;
+
+		/* The legacy image is ARM code; do not use the go command here. */
+		legacy_rc = ((unsigned long (*)(int, char *const []))
+				(ulong)LEGACY_UBOOT_ADDR)(0, NULL);
+		printf("DM200: legacy eMMC U-Boot returned (0x%lx)\n",
+		       legacy_rc);
+		return CMD_RET_FAILURE;
 	}
 	ret = load_krnl(desc, layout->kernel, layout->kernel_sectors,
 			KERNEL_ADDR, &kernel_size);
@@ -199,6 +260,7 @@ fail:
 }
 
 U_BOOT_CMD(dm200boot, 2, 0, do_dm200boot,
-	   "boot DM200 KRNL and resource images with a direct rootfs",
+	   "boot DM200 directly from SD or chainload legacy eMMC U-Boot",
 	   "[sd|emmc|recovery]\n"
-	   "    sd: SD boot image (default); emmc/recovery: original DM200 layout");
+	   "    sd: SD direct rootfs (default); emmc: chainload legacy U-Boot;\n"
+	   "    recovery: direct boot from the original recovery layout");
