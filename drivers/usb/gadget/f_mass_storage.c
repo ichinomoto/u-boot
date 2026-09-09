@@ -245,6 +245,7 @@
 #include <log.h>
 #include <malloc.h>
 #include <console.h>
+#include <time.h>
 #include <g_dnl.h>
 #include <dm/devres.h>
 #include <linux/bug.h>
@@ -650,33 +651,45 @@ static void busy_indicator(void)
 static int sleep_thread(struct fsg_common *common)
 {
 	int	rc = 0;
-	int i = 0, k = 0;
+	ulong last_abort_check = get_timer(0);
+	ulong last_indicator = last_abort_check;
 
 	/* Wait until a signal arrives or we are woken up */
 	for (;;) {
 		if (common->thread_wakeup_needed)
 			break;
 
-		if (++i == 20000) {
-			busy_indicator();
-			i = 0;
-			k++;
-		}
-
-		if (k == 10) {
+		/*
+		 * fsg_main_thread() can stay in this wait loop while the host
+		 * is idle.  In that case the UMS command's outer loop cannot
+		 * reach its keyed-abort check, so poll the console here.  Do
+		 * this periodically rather than on every iteration: the DM200
+		 * keyboard input path performs I2C accesses when it is polled.
+		 */
+		if (get_timer(last_abort_check) >= 50) {
 			/* Handle START-STOP UNIT */
 			if (common->eject)
 				return -EPIPE;
 
-			/* Handle CTRL+C */
-			if (ctrlc())
+			if (IS_ENABLED(CONFIG_CMD_UMS_ABORT_KEYED)) {
+				if (tstc()) {
+					getchar();
+					return -EPIPE;
+				}
+			} else if (ctrlc()) {
 				return -EPIPE;
+			}
 
 			/* Check cable connection */
 			if (!g_dnl_board_usb_cable_connected())
 				return -EIO;
 
-			k = 0;
+			last_abort_check = get_timer(0);
+		}
+
+		if (get_timer(last_indicator) >= 500) {
+			busy_indicator();
+			last_indicator = get_timer(0);
 		}
 
 		schedule();

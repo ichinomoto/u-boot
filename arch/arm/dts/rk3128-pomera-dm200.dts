@@ -161,6 +161,19 @@
 	status = "okay";
 };
 
+&usb2phy {
+	status = "okay";
+};
+
+&usb2phy_otg {
+	status = "okay";
+};
+
+&usb_otg {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
 &i2c0 {
 	clock-frequency = <100000>;
 	status = "okay";
