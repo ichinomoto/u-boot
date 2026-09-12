@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0+
 /* DM200 direct boot and legacy eMMC U-Boot chainloader. */
 #include <blk.h>
+#include <backlight.h>
 #include <command.h>
 #include <cpu_func.h>
 #include <dm.h>
+#include <generic-phy.h>
 #include <mapmem.h>
 #include <mmc.h>
 #include <memalign.h>
+#include <asm/io.h>
 #include <asm/unaligned.h>
+#include <linux/delay.h>
 #include <linux/libfdt.h>
 #include <linux/sizes.h>
 
@@ -19,6 +23,17 @@
 #define LOADER_HEADER_SIZE	2048
 #define LOADER_HEADER_SECTORS	(LOADER_HEADER_SIZE / SECTOR_SIZE)
 #define LOADER_SLOT_SIZE	SZ_1M
+
+/* RK3128 display registers used to leave the panel in a known-off state. */
+#define DM200_VOP_BASE			0x1010e000
+#define DM200_VOP_SYS_CTRL		0x00
+#define DM200_VOP_AXI_BUS_CTRL		0x2c
+#define DM200_VOP_REG_CFG_DONE		0x90
+#define DM200_VOP_WIN0_EN		BIT(0)
+#define DM200_VOP_STANDBY		BIT(30)
+#define DM200_VOP_OUTPUT_CLK_EN		(BIT(26) | BIT(24) | BIT(22))
+#define DM200_GRF_LVDS_CON0		0x20008150
+#define DM200_LVDS_CON0_WMSK		0x03cf
 
 struct dm200_layout {
 	lbaint_t kernel;
@@ -185,6 +200,68 @@ static int load_resource_fdt(struct blk_desc *desc, lbaint_t sector,
 	return -ENOENT;
 }
 
+/*
+ * Linux reinitialises the VOP/LVDS pipeline during DRM probe.  Do not leave
+ * U-Boot scanning out while that happens: blank the backlight first, put the
+ * VOP into standby, then turn off the LVDS PHY and output.  This deliberately
+ * favours a short black interval over a seamless U-Boot-to-Linux transition.
+ */
+static void dm200_display_shutdown(void)
+{
+	struct udevice *backlight, *display;
+	struct phy dphy;
+	u32 val;
+	int ret;
+	bool have_dphy = false;
+
+	ret = uclass_get_device(UCLASS_PANEL_BACKLIGHT, 0, &backlight);
+	if (!ret) {
+		ret = backlight_set_brightness(backlight, BACKLIGHT_OFF);
+		if (ret)
+			printf("DM200: failed to turn off backlight (%d)\n", ret);
+	} else {
+		printf("DM200: backlight unavailable during shutdown (%d)\n", ret);
+	}
+
+	/* Stop the active window and request VOP standby. */
+	val = readl(DM200_VOP_BASE + DM200_VOP_SYS_CTRL);
+	val &= ~DM200_VOP_WIN0_EN;
+	val |= DM200_VOP_STANDBY;
+	writel(val, DM200_VOP_BASE + DM200_VOP_SYS_CTRL);
+	writel(1, DM200_VOP_BASE + DM200_VOP_REG_CFG_DONE);
+
+	/* Allow the pending shadow-register update to reach a frame boundary. */
+	mdelay(20);
+
+	val = readl(DM200_VOP_BASE + DM200_VOP_AXI_BUS_CTRL);
+	val &= ~DM200_VOP_OUTPUT_CLK_EN;
+	writel(val, DM200_VOP_BASE + DM200_VOP_AXI_BUS_CTRL);
+
+	ret = uclass_get_device_by_driver(UCLASS_DISPLAY,
+					  DM_DRIVER_GET(rk3126_lvds), &display);
+	if (!ret) {
+		ret = generic_phy_get_by_name(display, "dphy", &dphy);
+		if (!ret)
+			have_dphy = true;
+		else
+			printf("DM200: LVDS PHY unavailable during shutdown (%d)\n",
+			       ret);
+	} else {
+		printf("DM200: LVDS display unavailable during shutdown (%d)\n",
+		       ret);
+	}
+
+	/* GRF writes use the upper half-word as a write mask. */
+	writel(DM200_LVDS_CON0_WMSK << 16, DM200_GRF_LVDS_CON0);
+	if (have_dphy) {
+		ret = generic_phy_power_off(&dphy);
+		if (ret)
+			printf("DM200: failed to power off LVDS PHY (%d)\n", ret);
+	}
+
+	puts("DM200: display disabled before Linux\n");
+}
+
 static int do_dm200boot(struct cmd_tbl *cmdtp, int flag, int argc,
 			char *const argv[])
 {
@@ -248,6 +325,7 @@ static int do_dm200boot(struct cmd_tbl *cmdtp, int flag, int argc,
 		goto fail;
 	printf("DM200: kernel %u bytes, separate resource DTB, no initramfs\n",
 	       kernel_size);
+//	dm200_display_shutdown();
 
 	/* '-' tells bootz that no external initramfs is present. */
 	snprintf(command, sizeof(command), "bootz %x - %x",
