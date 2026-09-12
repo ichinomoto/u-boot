@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0+
 
 dtb-$(CONFIG_TARGET_POMERA_DM200) += rk3128-pomera-dm200.dtb
+dtb-$(CONFIG_TARGET_POMERA_DM250) += rk3128-pomera-dm250.dtb
 
 dtb-$(CONFIG_TARGET_SMARTWEB) += at91sam9260-smartweb.dtb
 dtb-$(CONFIG_TARGET_TAURUS) += at91sam9g20-taurus.dtb

@@ -1,0 +1,356 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+
+/dts-v1/;
+
+#include <arm/rockchip/rk3128.dtsi>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/pwm/pwm.h>
+
+/ {
+	model = "King Jim Pomera DM250";
+	compatible = "kingjim,pomera-dm250", "rockchip,rk3128";
+
+	aliases {
+		mmc0 = &emmc;
+		mmc1 = &sdmmc;
+	};
+
+	chosen {
+		stdout-path = &uart1;
+	};
+
+	memory@60000000 {
+		device_type = "memory";
+		reg = <0x60000000 0x40000000>;
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		/* U-Boot requires the table to be ascending. */
+		brightness-levels = <0 255>;
+		num-interpolated-steps = <255>;
+		default-brightness-level = <128>;
+		enable-gpios = <&gpio0 RK_PD3 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&backlight_enable>;
+		pwms = <&pwm0 0 25000 PWM_POLARITY_INVERTED>;
+	};
+
+	panel {
+		compatible = "panel-lvds";
+		backlight = <&backlight>;
+		data-mapping = "jeida-24";
+		enable-gpios = <&gpio0 RK_PD0 GPIO_ACTIVE_HIGH>;
+		height-mm = <125>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&panel_enable>;
+		power-supply = <&vcc_lcd>;
+		width-mm = <223>;
+
+		panel-timing {
+			clock-frequency = <51200000>;
+			hactive = <1024>;
+			vactive = <600>;
+			hback-porch = <100>;
+			hfront-porch = <210>;
+			hsync-len = <10>;
+			vback-porch = <8>;
+			vfront-porch = <25>;
+			vsync-len = <2>;
+			hsync-active = <0>;
+			vsync-active = <0>;
+			de-active = <0>;
+			pixelclk-active = <0>;
+		};
+
+		port {
+			panel_in_lvds: endpoint {
+				remote-endpoint = <&lvds_out_panel>;
+			};
+		};
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&dm250_button_pins>;
+
+		key-right-shift {
+			label = "Right Shift";
+			linux,code = <KEY_RIGHTSHIFT>;
+			gpios = <&gpio0 RK_PB4 GPIO_ACTIVE_LOW>;
+		};
+		key-left-alt {
+			label = "Left Alt";
+			linux,code = <KEY_LEFTALT>;
+			gpios = <&gpio0 RK_PB5 GPIO_ACTIVE_LOW>;
+		};
+		key-lid {
+			label = "Lid Switch";
+			linux,code = <SW_LID>;
+			gpios = <&gpio0 RK_PC4 GPIO_ACTIVE_LOW>;
+		};
+		key-power {
+			label = "Power";
+			linux,code = <KEY_POWER>;
+			gpios = <&gpio0 RK_PA2 GPIO_ACTIVE_LOW>;
+		};
+	};
+};
+
+&emmc {
+	bus-width = <8>;
+	cap-mmc-highspeed;
+	max-frequency = <50000000>;
+	mmc-ddr-3_3v;
+	no-sd;
+	no-sdio;
+	non-removable;
+	pinctrl-names = "default";
+	pinctrl-0 = <&emmc_clk &emmc_cmd &emmc_bus8>;
+	status = "okay";
+};
+
+&display_subsystem {
+	status = "okay";
+};
+
+&dphy {
+	status = "okay";
+};
+
+&grf {
+	lvds: lvds {
+		compatible = "rockchip,rk3126-lvds";
+		phys = <&dphy>;
+		phy-names = "dphy";
+		rockchip,grf = <&grf>;
+		rockchip,output = "lvds";
+		status = "okay";
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				lvds_in_vop: endpoint {
+					remote-endpoint = <&vop_out_lvds>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				lvds_out_panel: endpoint {
+					remote-endpoint = <&panel_in_lvds>;
+				};
+			};
+		};
+	};
+};
+
+&sdmmc {
+	broken-cd;
+	bus-width = <4>;
+	cap-sd-highspeed;
+	max-frequency = <37500000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc_clk &sdmmc_cmd &sdmmc_bus4>;
+	vmmc-supply = <&vcc_sd>;
+	status = "okay";
+};
+
+&usb2phy {
+	status = "okay";
+};
+
+&usb2phy_otg {
+	status = "okay";
+};
+
+&usb_otg {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+
+	keyboard@45 {
+		compatible = "toshiba,tc35894";
+		reg = <0x45>;
+		interrupt-parent = <&gpio0>;
+		interrupts = <RK_PA7 IRQ_TYPE_EDGE_FALLING>;
+		interrupt-controller;
+		#interrupt-cells = <1>;
+		reset-gpios = <&gpio0 RK_PD1 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&tc35894_irq>, <&tc35894_reset>;
+		wakeup-source;
+
+		keypad {
+			compatible = "toshiba,tc3589x-keypad";
+			debounce-delay-ms = <50>;
+			interrupts = <6>;
+			keypad,num-columns = <12>;
+			keypad,num-rows = <8>;
+			wakeup-source;
+			linux,keymap =
+				<MATRIX_KEY(6, 10, KEY_ESC)>,
+				<MATRIX_KEY(7, 10, KEY_GRAVE)>,
+				<MATRIX_KEY(7, 11, KEY_F1)>,
+				<MATRIX_KEY(7, 9, KEY_F2)>,
+				<MATRIX_KEY(5, 9, KEY_F3)>,
+				<MATRIX_KEY(6, 9, KEY_F4)>,
+				<MATRIX_KEY(4, 8, KEY_F5)>,
+				<MATRIX_KEY(6, 6, KEY_F6)>,
+				<MATRIX_KEY(5, 5, KEY_F7)>,
+				<MATRIX_KEY(7, 5, KEY_F8)>,
+				<MATRIX_KEY(7, 3, KEY_F9)>,
+				<MATRIX_KEY(3, 3, KEY_F10)>,
+				<MATRIX_KEY(7, 0, KEY_INSERT)>,
+				<MATRIX_KEY(7, 2, KEY_DELETE)>,
+				<MATRIX_KEY(3, 10, KEY_1)>,
+				<MATRIX_KEY(3, 11, KEY_2)>,
+				<MATRIX_KEY(3, 9, KEY_3)>,
+				<MATRIX_KEY(3, 8, KEY_4)>,
+				<MATRIX_KEY(7, 8, KEY_5)>,
+				<MATRIX_KEY(7, 7, KEY_6)>,
+				<MATRIX_KEY(3, 7, KEY_7)>,
+				<MATRIX_KEY(3, 6, KEY_8)>,
+				<MATRIX_KEY(3, 5, KEY_9)>,
+				<MATRIX_KEY(3, 4, KEY_0)>,
+				<MATRIX_KEY(7, 4, KEY_MINUS)>,
+				<MATRIX_KEY(7, 6, KEY_EQUAL)>,
+				<MATRIX_KEY(2, 3, KEY_YEN)>,
+				<MATRIX_KEY(5, 3, KEY_BACKSPACE)>,
+				<MATRIX_KEY(5, 10, KEY_TAB)>,
+				<MATRIX_KEY(2, 10, KEY_Q)>,
+				<MATRIX_KEY(2, 11, KEY_W)>,
+				<MATRIX_KEY(2, 9, KEY_E)>,
+				<MATRIX_KEY(2, 8, KEY_R)>,
+				<MATRIX_KEY(5, 8, KEY_T)>,
+				<MATRIX_KEY(5, 7, KEY_Y)>,
+				<MATRIX_KEY(2, 7, KEY_U)>,
+				<MATRIX_KEY(2, 6, KEY_I)>,
+				<MATRIX_KEY(2, 5, KEY_O)>,
+				<MATRIX_KEY(2, 4, KEY_P)>,
+				<MATRIX_KEY(5, 4, KEY_LEFTBRACE)>,
+				<MATRIX_KEY(5, 6, KEY_RIGHTBRACE)>,
+				<MATRIX_KEY(0, 3, KEY_ENTER)>,
+				<MATRIX_KEY(5, 11, KEY_CAPSLOCK)>,
+				<MATRIX_KEY(1, 10, KEY_A)>,
+				<MATRIX_KEY(1, 11, KEY_S)>,
+				<MATRIX_KEY(1, 9, KEY_D)>,
+				<MATRIX_KEY(1, 8, KEY_F)>,
+				<MATRIX_KEY(6, 8, KEY_G)>,
+				<MATRIX_KEY(6, 7, KEY_H)>,
+				<MATRIX_KEY(1, 7, KEY_J)>,
+				<MATRIX_KEY(1, 6, KEY_K)>,
+				<MATRIX_KEY(1, 5, KEY_L)>,
+				<MATRIX_KEY(1, 4, KEY_SEMICOLON)>,
+				<MATRIX_KEY(6, 4, KEY_APOSTROPHE)>,
+				<MATRIX_KEY(0, 4, KEY_BACKSLASH)>,
+				<MATRIX_KEY(4, 10, KEY_LEFTSHIFT)>,
+				<MATRIX_KEY(0, 10, KEY_Z)>,
+				<MATRIX_KEY(0, 11, KEY_X)>,
+				<MATRIX_KEY(0, 9, KEY_C)>,
+				<MATRIX_KEY(0, 8, KEY_V)>,
+				<MATRIX_KEY(4, 9, KEY_B)>,
+				<MATRIX_KEY(4, 7, KEY_N)>,
+				<MATRIX_KEY(0, 7, KEY_M)>,
+				<MATRIX_KEY(0, 6, KEY_COMMA)>,
+				<MATRIX_KEY(0, 5, KEY_DOT)>,
+				<MATRIX_KEY(4, 4, KEY_SLASH)>,
+				<MATRIX_KEY(4, 6, KEY_RO)>,
+				<MATRIX_KEY(6, 1, KEY_UP)>,
+				<MATRIX_KEY(4, 11, KEY_LEFTCTRL)>,
+				<MATRIX_KEY(6, 11, KEY_LEFTMETA)>,
+				<MATRIX_KEY(4, 5, KEY_MUHENKAN)>,
+				<MATRIX_KEY(6, 2, KEY_SPACE)>,
+				<MATRIX_KEY(6, 0, KEY_HENKAN)>,
+				<MATRIX_KEY(0, 0, KEY_KATAKANAHIRAGANA)>,
+				<MATRIX_KEY(3, 0, KEY_RIGHTCTRL)>,
+				<MATRIX_KEY(4, 1, KEY_LEFT)>,
+				<MATRIX_KEY(4, 2, KEY_DOWN)>,
+				<MATRIX_KEY(4, 0, KEY_RIGHT)>;
+		};
+	};
+
+	pmic@1c {
+		compatible = "rockchip,rk818";
+		reg = <0x1c>;
+		system-power-controller;
+
+		regulators {
+			vcc_sd: LDO_REG9 {
+				regulator-name = "vcc_sd";
+				regulator-min-microvolt = <3000000>;
+				regulator-max-microvolt = <3000000>;
+				regulator-boot-on;
+			};
+
+			vcc_lcd: SWITCH_REG {
+				regulator-name = "vcc_lcd";
+				regulator-always-on;
+				regulator-boot-on;
+			};
+		};
+	};
+};
+
+&pinctrl {
+	dm250 {
+		dm250_button_pins: dm250-button-pins {
+			rockchip,pins = <0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_default>,
+					<0 RK_PC4 RK_FUNC_GPIO &pcfg_pull_default>,
+					<0 RK_PB4 RK_FUNC_GPIO &pcfg_pull_default>,
+					<0 RK_PB5 RK_FUNC_GPIO &pcfg_pull_default>;
+		};
+	};
+
+	keyboard {
+		tc35894_irq: tc35894-irq {
+			rockchip,pins = <0 RK_PA7 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		tc35894_reset: tc35894-reset {
+			rockchip,pins = <0 RK_PD1 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	display {
+		backlight_enable: backlight-enable {
+			rockchip,pins = <0 RK_PD3 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		panel_enable: panel-enable {
+			rockchip,pins = <0 RK_PD0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+&pwm0 {
+	status = "okay";
+};
+
+&uart1 {
+	status = "okay";
+};
+
+&uart2 {
+	status = "disabled";
+};
+
+&vop {
+	status = "okay";
+
+	port {
+		vop_out_lvds: endpoint@2 {
+			reg = <2>;
+			remote-endpoint = <&lvds_in_vop>;
+		};
+	};
+};
