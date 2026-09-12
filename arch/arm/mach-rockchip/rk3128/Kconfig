@@ -18,6 +18,13 @@ config TARGET_POMERA_DM200
 	  Pomera DM200 with 512 MiB RAM, RK818 and UART1 console.
 	  Runs after a Rockchip DDR loader and miniloader.
 
+config TARGET_POMERA_DM250
+	bool "King Jim Pomera DM250"
+	select BOARD_LATE_INIT
+	help
+	  Pomera DM250 with 1 GiB RAM, RK818 and UART1 console.
+	  Runs after a Rockchip DDR loader and miniloader.
+
 endchoice
 
 config ROCKCHIP_BOOT_MODE_REG
@@ -34,5 +41,6 @@ config SYS_MALLOC_F_LEN
 
 source "board/rockchip/evb_rk3128/Kconfig"
 source "board/kingjim/pomera_dm200/Kconfig"
+source "board/kingjim/pomera_dm250/Kconfig"
 
 endif
