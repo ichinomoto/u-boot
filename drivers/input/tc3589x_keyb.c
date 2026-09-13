@@ -72,18 +72,20 @@
 #define TC3589x_MAX_KMAP_ROWS		16	/* including Fn layer */
 #define TC3589x_MAX_COLS		12
 
-static const char * const tc3589x_modifier_labels[] = {
+static const char * const tc3589x_external_labels[] = {
 	"Left Alt",
 	"Left Control",
 	"Left Shift",
 	"Right Shift",
+	"Home",
 };
 
-static const u16 tc3589x_modifier_keycodes[] = {
+static const u16 tc3589x_external_keycodes[] = {
 	KEY_LEFTALT,
 	KEY_LEFTCTRL,
 	KEY_LEFTSHIFT,
 	KEY_RIGHTSHIFT,
+	KEY_HOME,
 };
 
 struct tc3589x_keyb_priv {
@@ -94,15 +96,15 @@ struct tc3589x_keyb_priv {
 	u16 states[TC3589x_MAX_ROWS + 1];
 };
 
-static u16 tc3589x_read_modifiers(void)
+static u16 tc3589x_read_external_keys(void)
 {
 	u16 state = 0;
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(tc3589x_modifier_labels); i++) {
+	for (i = 0; i < ARRAY_SIZE(tc3589x_external_labels); i++) {
 		struct udevice *button;
 
-		if (!button_get_by_label(tc3589x_modifier_labels[i], &button) &&
+		if (!button_get_by_label(tc3589x_external_labels[i], &button) &&
 		    button_get_state(button) == BUTTON_ON)
 			state |= 1 << i;
 	}
@@ -139,8 +141,8 @@ static int tc3589x_read_keys(struct input_config *input)
 		new_states[row] |= (1 << col);
 	}
 
-	/* The four modifier keys are GPIOs outside the TC3589x matrix. */
-	new_states[priv->rows] = tc3589x_read_modifiers();
+	/* The external modifier keys and Home are outside the TC3589x matrix. */
+	new_states[priv->rows] = tc3589x_read_external_keys();
 
 	/* collect state changes */
 	for (row = 0; row <= priv->rows; row++) {
@@ -149,8 +151,8 @@ static int tc3589x_read_keys(struct input_config *input)
 			now = new_states[row] & (1 << col);
 
 			if (row == priv->rows)
-				code = col < ARRAY_SIZE(tc3589x_modifier_keycodes) ?
-					tc3589x_modifier_keycodes[col] : 0;
+				code = col < ARRAY_SIZE(tc3589x_external_keycodes) ?
+					tc3589x_external_keycodes[col] : 0;
 			else
 				code = priv->keymap[row][col];
 			if (code == 0)
