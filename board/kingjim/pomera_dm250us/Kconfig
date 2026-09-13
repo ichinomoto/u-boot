@@ -1,0 +1,12 @@
+if TARGET_POMERA_DM250US
+
+config SYS_BOARD
+	default "pomera_dm250us"
+
+config SYS_VENDOR
+	default "kingjim"
+
+config SYS_CONFIG_NAME
+	default "pomera_dm250us"
+
+endif
