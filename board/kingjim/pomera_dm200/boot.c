@@ -262,11 +262,11 @@ static void dm200_display_shutdown(void)
 	puts("DM200: display disabled before Linux\n");
 }
 
-static int do_dm200boot(struct cmd_tbl *cmdtp, int flag, int argc,
-			char *const argv[])
+static int do_pomera_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+			  char *const argv[])
 {
 	const struct dm200_layout *layout = &sd_layout;
-	const char *source = argc == 2 ? argv[1] : "sd";
+	const char *source = cmdtp->name;
 	struct udevice *dev;
 	struct blk_desc *desc;
 	struct mmc *mmc;
@@ -275,6 +275,9 @@ static int do_dm200boot(struct cmd_tbl *cmdtp, int flag, int argc,
 	bool chainload_legacy = false;
 	unsigned long legacy_rc;
 	char command[96];
+
+	if (argc != 1)
+		return CMD_RET_USAGE;
 
 	if (!strcmp(source, "emmc")) {
 		seq = 0;
@@ -337,8 +340,9 @@ fail:
 	return CMD_RET_FAILURE;
 }
 
-U_BOOT_CMD(dm200boot, 2, 0, do_dm200boot,
-	   "boot DM200 directly from SD or chainload legacy eMMC U-Boot",
-	   "[sd|emmc|recovery]\n"
-	   "    sd: SD direct rootfs (default); emmc: chainload legacy U-Boot;\n"
-	   "    recovery: direct boot from the original recovery layout");
+U_BOOT_CMD(sd, 1, 0, do_pomera_boot,
+	   "boot DM200 directly from SD", "");
+U_BOOT_CMD(emmc, 1, 0, do_pomera_boot,
+	   "chainload the legacy DM200 eMMC U-Boot", "");
+U_BOOT_CMD(recovery, 1, 0, do_pomera_boot,
+	   "boot DM200 directly from the recovery layout", "");

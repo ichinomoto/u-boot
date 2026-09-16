@@ -198,11 +198,11 @@ out:
 	return ret;
 }
 
-static int do_dm250usboot(struct cmd_tbl *cmdtp, int flag, int argc,
-			char *const argv[])
+static int do_pomera_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+			  char *const argv[])
 {
 	const struct dm250us_layout *layout = &sd_layout;
-	const char *source = argc == 2 ? argv[1] : "sd";
+	const char *source = cmdtp->name;
 	struct udevice *dev;
 	struct blk_desc *desc;
 	struct mmc *mmc;
@@ -211,6 +211,9 @@ static int do_dm250usboot(struct cmd_tbl *cmdtp, int flag, int argc,
 	bool chainload_legacy = false;
 	unsigned long legacy_rc;
 	char command[96];
+
+	if (argc != 1)
+		return CMD_RET_USAGE;
 
 	if (!strcmp(source, "emmc")) {
 		seq = 0;
@@ -272,8 +275,9 @@ fail:
 	return CMD_RET_FAILURE;
 }
 
-U_BOOT_CMD(dm250usboot, 2, 0, do_dm250usboot,
-	   "boot DM250US directly from SD or chainload legacy eMMC U-Boot",
-	   "[sd|emmc|recovery]\n"
-	   "    sd: SD direct rootfs (default); emmc: chainload legacy U-Boot;\n"
-	   "    recovery: direct boot from the original recovery layout");
+U_BOOT_CMD(sd, 1, 0, do_pomera_boot,
+	   "boot DM250US directly from SD", "");
+U_BOOT_CMD(emmc, 1, 0, do_pomera_boot,
+	   "chainload the legacy DM250US eMMC U-Boot", "");
+U_BOOT_CMD(recovery, 1, 0, do_pomera_boot,
+	   "boot DM250US directly from the recovery layout", "");

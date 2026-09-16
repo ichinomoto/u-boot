@@ -51,7 +51,7 @@ int rk_board_late_init(void)
 	/* Preserve the stock three-key recovery gesture, without WARP. */
 	if (pressed("Right Shift") && pressed("Left Alt") && pressed("Power")) {
 		env_set("dm250_recovery", "1");
-		puts("DM250: recovery keys held (used by dm250boot emmc)\n");
+		puts("DM250: recovery keys held (used by emmc)\n");
 	}
 
 	ret = uclass_get_device_by_name(UCLASS_PMIC, "pmic@1c", &pmic);
