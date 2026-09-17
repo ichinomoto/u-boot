@@ -32,11 +32,6 @@ static const struct dm250us_layout sd_layout = {
 	0x6000, 0x6000, 0xc000, 0x3000,
 };
 
-/* Original recovery layout; kept separate from the new SD image layout. */
-static const struct dm250us_layout recovery_layout = {
-	0x3f8000, 0x6000, 0xa000, 0x3000,
-};
-
 static int read_sectors(struct blk_desc *desc, lbaint_t start,
 			u32 count, void *buf)
 {
@@ -218,9 +213,6 @@ static int do_pomera_boot(struct cmd_tbl *cmdtp, int flag, int argc,
 	if (!strcmp(source, "emmc")) {
 		seq = 0;
 		chainload_legacy = true;
-	} else if (!strcmp(source, "recovery")) {
-		seq = 0;
-		layout = &recovery_layout;
 	} else if (strcmp(source, "sd")) {
 		return CMD_RET_USAGE;
 	}
@@ -279,5 +271,3 @@ U_BOOT_CMD(sd, 1, 0, do_pomera_boot,
 	   "boot DM250US directly from SD", "");
 U_BOOT_CMD(emmc, 1, 0, do_pomera_boot,
 	   "chainload the legacy DM250US eMMC U-Boot", "");
-U_BOOT_CMD(recovery, 1, 0, do_pomera_boot,
-	   "boot DM250US directly from the recovery layout", "");

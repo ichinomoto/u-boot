@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0+
 /* DM200 hardware setup, based on King Jim's U-Boot 2014.10 sources. */
 #include <config.h>
-#include <button.h>
 #include <dm.h>
-#include <env.h>
 #include <init.h>
 #include <asm/io.h>
 #include <asm/arch-rockchip/hardware.h>
@@ -35,24 +33,10 @@ void board_debug_uart_init(void)
 		     GPIO1B2_UART1_SIN << GPIO1B2_SHIFT);
 }
 
-static bool pressed(const char *label)
-{
-	struct udevice *dev;
-
-	return !button_get_by_label(label, &dev) &&
-		button_get_state(dev) == BUTTON_ON;
-}
-
 int rk_board_late_init(void)
 {
 	struct udevice *pmic;
 	int ret;
-
-	/* Preserve the stock three-key recovery gesture, without WARP. */
-	if (pressed("Right Shift") && pressed("Left Alt") && pressed("Power")) {
-		env_set("dm200_recovery", "1");
-		puts("DM200: recovery keys held (used by emmc)\n");
-	}
 
 	ret = uclass_get_device_by_name(UCLASS_PMIC, "pmic@1c", &pmic);
 	if (ret) {
