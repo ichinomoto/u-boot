@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0+
 /* DM250 direct boot and legacy eMMC U-Boot chainloader. */
 #include <blk.h>
+#include <backlight.h>
 #include <command.h>
 #include <cpu_func.h>
 #include <dm.h>
+#include <generic-phy.h>
 #include <mapmem.h>
 #include <mmc.h>
 #include <memalign.h>
+#include <asm/io.h>
 #include <asm/unaligned.h>
+#include <linux/delay.h>
 #include <linux/libfdt.h>
 #include <linux/sizes.h>
 
@@ -19,6 +23,17 @@
 #define LOADER_HEADER_SIZE	2048
 #define LOADER_HEADER_SECTORS	(LOADER_HEADER_SIZE / SECTOR_SIZE)
 #define LOADER_SLOT_SIZE	SZ_1M
+
+/* RK3128 display registers used to leave the panel in a known-off state. */
+#define DM250_VOP_BASE			0x1010e000
+#define DM250_VOP_SYS_CTRL		0x00
+#define DM250_VOP_AXI_BUS_CTRL		0x2c
+#define DM250_VOP_REG_CFG_DONE		0x90
+#define DM250_VOP_WIN0_EN		BIT(0)
+#define DM250_VOP_STANDBY		BIT(30)
+#define DM250_VOP_OUTPUT_CLK_EN		(BIT(26) | BIT(24) | BIT(22))
+#define DM250_GRF_LVDS_CON0		0x20008150
+#define DM250_LVDS_CON0_WMSK		0x03cf
 
 struct dm250_layout {
 	lbaint_t kernel;
@@ -193,6 +208,68 @@ out:
 	return ret;
 }
 
+/*
+ * Leave the display in a known-off state before handing control to the
+ * legacy U-Boot.  The next boot stage reinitialises the VOP/LVDS pipeline.
+ * This deliberately favours a short black interval over a seamless
+ * U-Boot-to-U-Boot transition.
+ */
+static void dm250_display_shutdown(void)
+{
+	struct udevice *backlight, *display;
+	struct phy dphy;
+	u32 val;
+	int ret;
+	bool have_dphy = false;
+
+	ret = uclass_get_device(UCLASS_PANEL_BACKLIGHT, 0, &backlight);
+	if (!ret) {
+		ret = backlight_set_brightness(backlight, BACKLIGHT_OFF);
+		if (ret)
+			printf("DM250: failed to turn off backlight (%d)\n", ret);
+	} else {
+		printf("DM250: backlight unavailable during shutdown (%d)\n", ret);
+	}
+
+	/* Stop the active window and request VOP standby. */
+	val = readl(DM250_VOP_BASE + DM250_VOP_SYS_CTRL);
+	val &= ~DM250_VOP_WIN0_EN;
+	val |= DM250_VOP_STANDBY;
+	writel(val, DM250_VOP_BASE + DM250_VOP_SYS_CTRL);
+	writel(1, DM250_VOP_BASE + DM250_VOP_REG_CFG_DONE);
+
+	/* Allow the pending shadow-register update to reach a frame boundary. */
+	mdelay(20);
+
+	val = readl(DM250_VOP_BASE + DM250_VOP_AXI_BUS_CTRL);
+	val &= ~DM250_VOP_OUTPUT_CLK_EN;
+	writel(val, DM250_VOP_BASE + DM250_VOP_AXI_BUS_CTRL);
+
+	ret = uclass_get_device_by_driver(UCLASS_DISPLAY,
+					  DM_DRIVER_GET(rk3126_lvds), &display);
+	if (!ret) {
+		ret = generic_phy_get_by_name(display, "dphy", &dphy);
+		if (!ret)
+			have_dphy = true;
+		else
+			printf("DM250: LVDS PHY unavailable during shutdown (%d)\n",
+			       ret);
+	} else {
+		printf("DM250: LVDS display unavailable during shutdown (%d)\n",
+		       ret);
+	}
+
+	/* GRF writes use the upper half-word as a write mask. */
+	writel(DM250_LVDS_CON0_WMSK << 16, DM250_GRF_LVDS_CON0);
+	if (have_dphy) {
+		ret = generic_phy_power_off(&dphy);
+		if (ret)
+			printf("DM250: failed to power off LVDS PHY (%d)\n", ret);
+	}
+
+	puts("DM250: display disabled before legacy U-Boot\n");
+}
+
 static int do_pomera_boot(struct cmd_tbl *cmdtp, int flag, int argc,
 			  char *const argv[])
 {
@@ -235,6 +312,7 @@ static int do_pomera_boot(struct cmd_tbl *cmdtp, int flag, int argc,
 		goto fail;
 	}
 	if (chainload_legacy) {
+		dm250_display_shutdown();
 		puts("DM250: loading legacy eMMC U-Boot\n");
 		ret = load_legacy_uboot(desc);
 		if (ret)

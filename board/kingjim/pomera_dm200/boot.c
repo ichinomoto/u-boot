@@ -197,10 +197,10 @@ static int load_resource_fdt(struct blk_desc *desc, lbaint_t sector,
 }
 
 /*
- * Linux reinitialises the VOP/LVDS pipeline during DRM probe.  Do not leave
- * U-Boot scanning out while that happens: blank the backlight first, put the
- * VOP into standby, then turn off the LVDS PHY and output.  This deliberately
- * favours a short black interval over a seamless U-Boot-to-Linux transition.
+ * Leave the display in a known-off state before handing control to the
+ * legacy U-Boot.  The next boot stage reinitialises the VOP/LVDS pipeline.
+ * This deliberately favours a short black interval over a seamless
+ * U-Boot-to-U-Boot transition.
  */
 static void dm200_display_shutdown(void)
 {
@@ -255,7 +255,7 @@ static void dm200_display_shutdown(void)
 			printf("DM200: failed to power off LVDS PHY (%d)\n", ret);
 	}
 
-	puts("DM200: display disabled before Linux\n");
+	puts("DM200: display disabled before legacy U-Boot\n");
 }
 
 static int do_pomera_boot(struct cmd_tbl *cmdtp, int flag, int argc,
@@ -300,6 +300,7 @@ static int do_pomera_boot(struct cmd_tbl *cmdtp, int flag, int argc,
 		goto fail;
 	}
 	if (chainload_legacy) {
+		dm200_display_shutdown();
 		puts("DM200: loading legacy eMMC U-Boot\n");
 		ret = load_legacy_uboot(desc);
 		if (ret)
@@ -321,7 +322,6 @@ static int do_pomera_boot(struct cmd_tbl *cmdtp, int flag, int argc,
 		goto fail;
 	printf("DM200: kernel %u bytes, separate resource DTB, no initramfs\n",
 	       kernel_size);
-//	dm200_display_shutdown();
 
 	/* '-' tells bootz that no external initramfs is present. */
 	snprintf(command, sizeof(command), "bootz %x - %x",
