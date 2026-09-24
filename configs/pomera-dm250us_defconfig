@@ -21,7 +21,7 @@ CONFIG_BOOTDELAY=1
 CONFIG_USE_PREBOOT=y
 CONFIG_PREBOOT="setenv stdin serial,tc3589x-keyb"
 CONFIG_USE_BOOTARGS=y
-CONFIG_BOOTARGS="console=ttyS1,115200n8 console=tty1 root=/dev/mmcblk1p2 rootwait"
+CONFIG_BOOTARGS="console=ttyS1,115200n8 console=tty1 root=/dev/mmcblk1p2 rootwait quiet systemd.show_status=yes"
 CONFIG_BOOTCOMMAND="sd"
 CONFIG_DEFAULT_FDT_FILE="rockchip/rk3128-pomera-dm250us.dtb"
 # CONFIG_DISPLAY_CPUINFO is not set
