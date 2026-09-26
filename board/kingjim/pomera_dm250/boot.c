@@ -15,6 +15,8 @@
 #include <linux/libfdt.h>
 #include <linux/sizes.h>
 
+#include "../common/bt_address.h"
+
 #define SECTOR_SIZE		512
 #define KERNEL_ADDR		0x62000000
 #define FDT_ADDR		0x61f00000
@@ -283,6 +285,7 @@ static int do_pomera_boot(struct cmd_tbl *cmdtp, int flag, int argc,
 	bool chainload_legacy = false;
 	unsigned long legacy_rc;
 	char command[96];
+	void *fdt;
 
 	if (argc != 1)
 		return CMD_RET_USAGE;
@@ -334,6 +337,10 @@ static int do_pomera_boot(struct cmd_tbl *cmdtp, int flag, int argc,
 		goto fail;
 	printf("DM250: kernel %u bytes, separate resource DTB, no initramfs\n",
 	       kernel_size);
+
+	fdt = map_sysmem(FDT_ADDR, SZ_1M);
+	pomera_setup_bt_address(fdt, SZ_1M);
+	unmap_sysmem(fdt);
 
 	/* '-' tells bootz that no external initramfs is present. */
 	snprintf(command, sizeof(command), "bootz %x - %x",
